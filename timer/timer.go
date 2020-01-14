@@ -3,7 +3,7 @@ package timer
 import (
 	"runtime"
 	"time"
-	"gitee.com/lipanbin/goutils/logs"
+	"github.com/yinyihanbing/gutils/logs"
 )
 
 // one dispatcher per goroutine (goroutine not safe)

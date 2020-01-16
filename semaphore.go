@@ -1,4 +1,4 @@
-package goutils
+package gutils
 
 // 信号
 type Semaphore chan struct{}

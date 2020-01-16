@@ -1,4 +1,4 @@
-package goutils
+package gutils
 
 import (
 	"github.com/kardianos/service"

@@ -113,6 +113,7 @@ func (this *RpcCli) getConn(addr string, timeout time.Duration) (*connInfo, erro
 	conn.addr = addr
 	conn.cc = cc
 	conn.sc = this.f(cc)
+	conn.ctx = ctx
 	conn.chanAsyncF = make(chan func(ctx context.Context, sc interface{}) error, this.queueLimitCount)
 	go conn.startQueueTask()
 

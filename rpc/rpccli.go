@@ -24,10 +24,11 @@ type RpcCli struct {
 
 // 连接信息1
 type connInfo struct {
-	addr       string                          // 远程服务地址
-	cc         *grpc.ClientConn                // 客户端连接
-	sc         interface{}                     // 远程服务客户端
-	chanAsyncF chan func(sc interface{}) error // 异步执行函数
+	addr       string           // 远程服务地址
+	cc         *grpc.ClientConn // 客户端连接
+	sc         interface{}      // 远程服务客户端
+	ctx        context.Context
+	chanAsyncF chan func(ctx context.Context, sc interface{}) error // 异步执行函数
 }
 
 // 启动队列执行任务
@@ -45,9 +46,9 @@ func (c *connInfo) startQueueTask() {
 }
 
 // 执行
-func (c *connInfo) exec(f func(sc interface{}) error) {
+func (c *connInfo) exec(f func(ctx context.Context, sc interface{}) error) {
 	defer panicError()
-	if err := f(c.sc); err != nil {
+	if err := f(c.ctx, c.sc); err != nil {
 		state := c.cc.GetState()
 		switch state {
 		case connectivity.Connecting, connectivity.TransientFailure, connectivity.Shutdown:
@@ -56,7 +57,7 @@ func (c *connInfo) exec(f func(sc interface{}) error) {
 				waitTime := tryExecTimeInterval[i]
 				logs.Error("cannot connect rpc server:%v, execute again after trying to reconnect...(%ds)(%d/%d)", c.addr, waitTime, i+1, len(tryExecTimeInterval))
 				time.Sleep(time.Second * time.Duration(waitTime))
-				if err := f(c.sc); err != nil {
+				if err := f(c.ctx, c.sc); err != nil {
 					switch state {
 					case connectivity.Connecting, connectivity.TransientFailure, connectivity.Shutdown:
 					default:
@@ -89,14 +90,14 @@ func panicError() {
 }
 
 // 获取连接信息
-func (this *RpcCli) getConn(addr string) (*connInfo, error) {
+func (this *RpcCli) getConn(addr string, timeout time.Duration) (*connInfo, error) {
 	// 查找缓存连接
 	v, ok := this.conn.Load(addr)
 	if ok {
 		return v.(*connInfo), nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	// 建立连接
@@ -112,7 +113,7 @@ func (this *RpcCli) getConn(addr string) (*connInfo, error) {
 	conn.addr = addr
 	conn.cc = cc
 	conn.sc = this.f(cc)
-	conn.chanAsyncF = make(chan func(sc interface{}) error, this.queueLimitCount)
+	conn.chanAsyncF = make(chan func(ctx context.Context, sc interface{}) error, this.queueLimitCount)
 	go conn.startQueueTask()
 
 	this.conn.Store(conn.addr, conn)
@@ -122,7 +123,7 @@ func (this *RpcCli) getConn(addr string) (*connInfo, error) {
 }
 
 // 同步执行( 连接服务器 - 执行函数 - 关闭连接 )
-func (this *RpcCli) SyncCall(addr string, f func(sc interface{}) error) error {
+func (this *RpcCli) SyncCall(addr string, f func(ctx context.Context, sc interface{}) error) error {
 	defer panicError()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -137,7 +138,7 @@ func (this *RpcCli) SyncCall(addr string, f func(sc interface{}) error) error {
 	}
 
 	// 执行函数
-	if err = f(this.f(cc)); err != nil {
+	if err = f(ctx, this.f(cc)); err != nil {
 		cc.Close()
 		logs.Error(err)
 		return err
@@ -150,13 +151,13 @@ func (this *RpcCli) SyncCall(addr string, f func(sc interface{}) error) error {
 }
 
 // 异步执行
-func (this *RpcCli) AsyncCall(addr string, f func(sc interface{}) error) (err error) {
+func (this *RpcCli) AsyncCall(addr string, f func(ctx context.Context, sc interface{}) error) (err error) {
 	defer panicError()
 
 	logs.Debug("开始异步执行RPC, 地址=%v", addr)
 
 	// 获取连接信息
-	conn, err := this.getConn(addr)
+	conn, err := this.getConn(addr, 15*time.Second)
 	if err != nil || conn == nil {
 		err := errors.New(fmt.Sprintf("unaccessible connection, addr=%s, error=%v", addr, err))
 		logs.Error(err)

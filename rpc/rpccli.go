@@ -24,10 +24,9 @@ type RpcCli struct {
 
 // 连接信息1
 type connInfo struct {
-	addr       string           // 远程服务地址
-	cc         *grpc.ClientConn // 客户端连接
-	sc         interface{}      // 远程服务客户端
-	ctx        context.Context
+	addr       string                                               // 远程服务地址
+	cc         *grpc.ClientConn                                     // 客户端连接
+	sc         interface{}                                          // 远程服务客户端
 	chanAsyncF chan func(ctx context.Context, sc interface{}) error // 异步执行函数
 }
 
@@ -48,7 +47,10 @@ func (c *connInfo) startQueueTask() {
 // 执行
 func (c *connInfo) exec(f func(ctx context.Context, sc interface{}) error) {
 	defer panicError()
-	if err := f(c.ctx, c.sc); err != nil {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	if err := f(ctx, c.sc); err != nil {
+		cancel()
 		state := c.cc.GetState()
 		switch state {
 		case connectivity.Connecting, connectivity.TransientFailure, connectivity.Shutdown:
@@ -57,17 +59,23 @@ func (c *connInfo) exec(f func(ctx context.Context, sc interface{}) error) {
 				waitTime := tryExecTimeInterval[i]
 				logs.Error("cannot connect rpc server:%v, execute again after trying to reconnect...(%ds)(%d/%d)", c.addr, waitTime, i+1, len(tryExecTimeInterval))
 				time.Sleep(time.Second * time.Duration(waitTime))
-				if err := f(c.ctx, c.sc); err != nil {
+
+				tryCtx, tryCtxCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				if err := f(tryCtx, c.sc); err != nil {
+					tryCtxCancel()
 					switch state {
 					case connectivity.Connecting, connectivity.TransientFailure, connectivity.Shutdown:
 					default:
 						break
 					}
 				} else {
+					tryCtxCancel()
 					break
 				}
 			}
 		}
+	} else {
+		cancel()
 	}
 }
 
@@ -90,14 +98,14 @@ func panicError() {
 }
 
 // 获取连接信息
-func (this *RpcCli) getConn(addr string, timeout time.Duration) (*connInfo, error) {
+func (this *RpcCli) getConn(addr string) (*connInfo, error) {
 	// 查找缓存连接
 	v, ok := this.conn.Load(addr)
 	if ok {
 		return v.(*connInfo), nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	// 建立连接
@@ -113,7 +121,6 @@ func (this *RpcCli) getConn(addr string, timeout time.Duration) (*connInfo, erro
 	conn.addr = addr
 	conn.cc = cc
 	conn.sc = this.f(cc)
-	conn.ctx = ctx
 	conn.chanAsyncF = make(chan func(ctx context.Context, sc interface{}) error, this.queueLimitCount)
 	go conn.startQueueTask()
 
@@ -158,7 +165,7 @@ func (this *RpcCli) AsyncCall(addr string, f func(ctx context.Context, sc interf
 	logs.Debug("开始异步执行RPC, 地址=%v", addr)
 
 	// 获取连接信息
-	conn, err := this.getConn(addr, 15*time.Second)
+	conn, err := this.getConn(addr)
 	if err != nil || conn == nil {
 		err := errors.New(fmt.Sprintf("unaccessible connection, addr=%s, error=%v", addr, err))
 		logs.Error(err)

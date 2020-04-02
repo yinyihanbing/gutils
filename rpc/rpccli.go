@@ -66,13 +66,15 @@ func (c *connInfo) exec(f func(ctx context.Context, sc interface{}) error) {
 					switch state {
 					case connectivity.Connecting, connectivity.TransientFailure, connectivity.Shutdown:
 					default:
-						break
+						logs.Error(err)
 					}
 				} else {
 					tryCtxCancel()
 					break
 				}
 			}
+		default:
+			logs.Error(err)
 		}
 	} else {
 		cancel()

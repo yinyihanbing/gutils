@@ -199,5 +199,5 @@ func (this *DbHelper) ExecuteDataSlice(p interface{}, strSql string, args ...int
 		}
 	}
 
-	return nil
+	return err
 }

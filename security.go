@@ -1,18 +1,18 @@
 package gutils
 
 import (
-	"crypto/md5"
-	"encoding/hex"
-	"crypto/sha256"
-	"hash"
-	"crypto/hmac"
 	"crypto"
+	"crypto/hmac"
+	"crypto/md5"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
-	"crypto/rsa"
-	"crypto/x509"
-	"crypto/rand"
-	"encoding/base64"
+	"hash"
 )
 
 // MD5编码
@@ -143,4 +143,24 @@ func RsaCheckSign(publicKey string, hash crypto.Hash, content, sign string) erro
 	err = rsa.VerifyPKCS1v15(pubKey, hash, hashed, signData)
 
 	return err
+}
+
+//RSA加密
+func RsaEncrypt(plainText []byte, key []byte) ([]byte, error) {
+	// pem解码
+	block, _ := pem.Decode(key)
+	// x509解码
+	publicKeyInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	// 类型断言
+	publicKey := publicKeyInterface.(*rsa.PublicKey)
+	// 对明文进行加密
+	cipherText, err := rsa.EncryptPKCS1v15(rand.Reader, publicKey, plainText)
+	if err != nil {
+		panic(err)
+	}
+	// 返回密文
+	return cipherText, nil
 }
